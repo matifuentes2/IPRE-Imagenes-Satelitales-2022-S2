@@ -1,0 +1,132 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var stgocenter = 
+    /* color: #ff0000 */
+    /* shown: false */
+    ee.Geometry.Point([-70.65670970791878, -33.51063849579262]),
+    stgo_area = 
+    /* color: #009999 */
+    /* shown: false */
+    /* displayProperties: [
+      {
+        "type": "rectangle"
+      }
+    ] */
+    ee.Geometry.Polygon(
+        [[[-70.95318816691396, -33.247243108263575],
+          [-70.95318816691396, -33.67115303072693],
+          [-70.36129973917957, -33.67115303072693],
+          [-70.36129973917957, -33.247243108263575]]], null, false),
+    geometry3 = 
+    /* color: #ffc82d */
+    /* shown: false */
+    /* displayProperties: [
+      {
+        "type": "rectangle"
+      }
+    ] */
+    ee.Geometry.Polygon(
+        [[[-70.8043346380747, -33.475020623697596],
+          [-70.8043346380747, -33.50150622104194],
+          [-70.75541114564307, -33.50150622104194],
+          [-70.75541114564307, -33.475020623697596]]], null, false),
+    view_reference = 
+    /* color: #d63000 */
+    /* shown: false */
+    ee.Geometry.Point([-70.61894546315321, -33.51021696053359]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// Módulos
+var Filtering = require("users/matifuentes2/crecimiento_urbano:modulos/Filtering")
+var Spectral = require("users/matifuentes2/crecimiento_urbano:modulos/Spectral")
+var Viz = require("users/matifuentes2/crecimiento_urbano:modulos/Viz")
+
+
+var aoi = stgo_area
+var point = stgocenter
+var hist_region = geometry3
+var start_year = 2019
+var end_year = 2021
+
+Map.centerObject(view_reference, 15);
+
+
+// Dynamic world built detection
+var res = Filtering.dw(start_year, end_year, aoi)
+var beforeUrban = res[0];
+var afterUrban = res[1];
+
+// Cloud masking
+var s2CloudMasked = Filtering.clouds(start_year, end_year, stgo_area);
+var yearlyComposites = Filtering.yearly(s2CloudMasked, start_year, end_year);
+var SimpleImageDiff = Spectral.simple_img_diff(yearlyComposites, start_year, end_year,
+                                               beforeUrban, afterUrban, aoi)
+
+Viz.plot_rgb(yearlyComposites, start_year, end_year, beforeUrban, afterUrban, aoi)  
+Viz.hist(SimpleImageDiff, geometry3)
+
+// Cambios identificados como construcciones
+var construido = Spectral.get_built(SimpleImageDiff, 0.07);
+var construido_return = Viz.vectorize_and_print_area(aoi, construido, "Construido (Km^2)",
+                        false, "Construido", "purple", 0)
+var construido_vect = construido_return[0]    
+var construido_area = construido_return[1]
+
+
+// Permisos de Edificacion Poligonizados
+var permisos = ee.FeatureCollection("projects/zinc-conduit-255721/assets/permisos_de_edificacion_2010_2021_SQUARE_POLYGON")
+              .filterBounds(stgo_area)
+              .filter([ee.Filter.gt('AÑO', 2016), ee.Filter.lt('AÑO', 2022)]);
+// Agregar un buffer de 10 a los permisos
+var bufferPoly = function(feature) {
+  return feature.buffer(10, 20);   
+};
+var permisos = permisos.map(bufferPoly);
+
+// Pixeles donde se detectó una construcción que no es cubierta por los permisos
+var not_inter_permisos_mask = ee.Image.constant(1).clip(permisos.geometry()).mask().not()
+var not_inter_permisos_image = construido.updateMask(not_inter_permisos_mask)
+var not_inter_permisos_return = Viz.vectorize_and_print_area(aoi, not_inter_permisos_image, "Construido No explicado por Permisos (Km^2)", 
+                                false, "Construido No explicado por Permisos", "yellow")
+var not_inter_permisos_vect = not_inter_permisos_return[0]   
+
+
+
+// Certificados de recepción Final
+var crf = ee.FeatureCollection("projects/zinc-conduit-255721/assets/CRF_2011_2021")
+               .filterBounds(stgo_area)
+               .filter(ee.Filter.rangeContains('AÑO_EMISI', 2016, 2021));
+
+// Agregar un buffer de 10 a los CRF
+var bufferPoly = function(feature) {
+  return feature.buffer(10);   
+};
+crf = crf.map(bufferPoly);
+
+// Pixeles donde se detectó una construcción que no es cubierta por los CRF
+var not_inter_crf_mask = ee.Image.constant(1).clip(crf.geometry()).mask().not()
+var not_inter_crf_image = construido.updateMask(not_inter_crf_mask)
+var not_inter_crf_return = Viz.vectorize_and_print_area(aoi, not_inter_crf_image, "Construido No explicado por CRF (Km^2)", 
+                         false, "Construido No explicado por CRF", "orange")
+var not_inter_crf_vect = not_inter_crf_return[0]      
+
+
+// No explicado por permisos ni CRF
+
+//var crf_y_permisos = crf.merge(permisos).union().geometry()
+var crf_y_permisos = crf.merge(permisos).geometry()
+var not_inter_mask = ee.Image.constant(1).clip(crf_y_permisos).mask().not()
+var not_inter_image = construido.updateMask(not_inter_mask)
+var not_inter_return = Viz.vectorize_and_print_area(aoi, not_inter_image, "Area construida no explicada (Km^2)", 
+                       true, "Construido No Explicado", "red")
+var not_inter_vect = not_inter_return[0]
+var not_inter_area = not_inter_return[1]
+
+
+// OPCIONAL: Exportación de resultados a drive
+// Export the FeatureCollection to a CSV file.
+//Export.table.toDrive({
+//  collection: not_inter_vect,
+//  description:'Built and not Explained',
+//  fileFormat: 'CSV'
+//});
+
+

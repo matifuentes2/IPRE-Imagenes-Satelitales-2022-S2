@@ -1,0 +1,79 @@
+// Solo para Sentinel
+exports.addNBAI = function(image) {
+    var nbai = image.expression(
+    '(B12 - (B11 / B3)) / (B12 + (B11 / B3))', {
+      'B12': image.select('B12'),
+      'B11': image.select('B11'),
+      'B3': image.select('B3')
+    }).rename("NBAI")
+    return image.addBands(nbai)
+};
+
+
+exports.simple_img_diff = function(yearly_composites, start_year, end_year,
+                                   beforeUrban, afterUrban, aoi){
+  var nbaiCollection = yearly_composites.select('NBAI');
+  var y_start = nbaiCollection.filterDate(start_year+'-01-01',start_year+'-12-31')
+    .first()
+    .clip(aoi)
+    .mask(beforeUrban);
+  
+  var y_end = nbaiCollection.filterDate(end_year+'-01-01',end_year+'-12-31')
+    .first()
+    .clip(aoi)
+    .mask(afterUrban);
+  
+  var SimpleImageDiff = y_start.subtract(y_end);
+  return SimpleImageDiff;
+}
+
+exports.multi_img_diff = function(monthly_composites, start_year, end_year,
+                                   beforeUrban, afterUrban, aoi){
+  var nbaiCollection = monthly_composites.select('NBAI');
+  var n_of_months = (end_year - start_year) * 12;
+  var months = ee.List.sequence(1, n_of_months);
+  // Compararemos todas las imágenes con la primera (La primera queda fija)
+  
+  var diffCollection = months.map(function(n)
+  { 
+    var startDate = ee.Date(start_year+'-01-01')
+    var y_start = nbaiCollection.filterDate(startDate,startDate.advance(1, 'day'))
+    .first()
+    .clip(aoi)
+    .mask(beforeUrban);
+    var endDate = startDate.advance(n, 'month')
+    var y_end = nbaiCollection.filterDate(endDate, endDate.advance(1, 'day'))
+      .first()
+      .clip(aoi)
+      .mask(afterUrban);
+    
+    var SimpleImageDiff = y_start.subtract(y_end).set('system:time_start',endDate);
+    return SimpleImageDiff;
+  });
+  return ee.ImageCollection(diffCollection);
+}
+
+function get_built(SimpleImageDiff, threshold)
+{
+  var classA = SimpleImageDiff.select('NBAI').gt(threshold);
+  var classB = SimpleImageDiff.select('NBAI').lt(threshold * -1);
+  var construido = classB.mask(classB);
+  return construido;
+}
+
+// Cambios identificados como construcciones
+exports.get_built = function(SimpleImageDiff, threshold)
+{
+  var classA = SimpleImageDiff.select('NBAI').gt(threshold);
+  var classB = SimpleImageDiff.select('NBAI').lt(threshold * -1);
+  var construido = classB.mask(classB);
+  return construido;
+}
+
+exports.get_multi_built = function(MultiImageDiff, threshold)
+{
+  var construidos = MultiImageDiff.map(function(image){return get_built(image, threshold)})
+  return construidos;
+}
+
+

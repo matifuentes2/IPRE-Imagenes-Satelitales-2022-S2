@@ -1,0 +1,96 @@
+// Mostrar las imágenes sentinel RGB
+exports.plot_rgb = function(yearlyComposites, start_year, end_year, beforeUrban, afterUrban, aoi)
+{
+  var a_start = yearlyComposites.filterDate(start_year+'-01-01',start_year+'-12-31')
+  .first()
+  .clip(aoi);
+  
+  var a_end = yearlyComposites.filterDate(end_year+'-01-01',end_year+'-12-31')
+    .first()
+    .clip(aoi);
+  
+  Map.addLayer(a_start.mask(beforeUrban), {
+    bands: 'B4,B3,B2',
+    min: 0.0,
+    max: 0.3
+  }, start_year.toString())
+  
+  Map.addLayer(a_end.mask(afterUrban), {
+    bands: 'B4,B3,B2',
+    min: 0.0,
+    max: 0.3
+  }, end_year.toString())
+}
+
+
+// Vectoriza una máscara, agrega la capa al mapa e imprime el área
+exports.vectorize_and_print_area = function(aoi, image, text_to_print, add_layer,
+                                  layer_name, layer_color, set_shown) {
+  if (set_shown === undefined || set_shown === null){set_shown = true}
+  var zones = image.gt(0)
+  zones = zones.updateMask(zones.neq(0));
+  
+  var vectors = zones.addBands(image).reduceToVectors({
+    geometry: aoi,
+    crs: image.projection(),
+    //scale: 1000,
+    scale: 10,
+    geometryType: 'polygon',
+    eightConnected: false,
+    labelProperty: 'zone',
+    reducer: ee.Reducer.mean(),
+    maxPixels: 1e10
+  });
+  if (add_layer){
+      var layer = Map.addLayer(vectors, {color: layer_color}, layer_name);
+      layer.setShown(set_shown)
+  }
+  var area = vectors.geometry().area(10).divide(1e6)
+  print(text_to_print, area)
+  return [vectors, area]
+}
+
+// Vectoriza una máscara y exporta el área
+exports.vectorize_and_export_area = function(aoi, image, text_to_print, add_layer,
+                                  layer_name, layer_color, set_shown) {
+  if (set_shown === undefined || set_shown === null){set_shown = true}
+  var zones = image.gt(0)
+  zones = zones.updateMask(zones.neq(0));
+  
+  var vectors = zones.addBands(image).reduceToVectors({
+    geometry: aoi,
+    crs: image.projection(),
+    //scale: 1000,
+    scale: 10,
+    geometryType: 'polygon',
+    eightConnected: false,
+    labelProperty: 'zone',
+    reducer: ee.Reducer.mean(),
+    maxPixels: 1e10
+  });
+  if (add_layer){
+      var layer = Map.addLayer(vectors, {color: layer_color}, layer_name);
+      layer.setShown(set_shown)
+  }
+  var area = vectors.geometry().area(10).divide(1e6)
+  print(text_to_print, area)
+  return [vectors, area]
+}
+
+
+// Recibe la diferencia de imágenes y un área a considerar para el histograma
+exports.hist = function(SimpleImageDiff, region){
+  var histogram = SimpleImageDiff.select('NBAI').reduceRegion({
+  reducer: ee.Reducer.histogram(255, 2)
+      .combine('mean', null, true)
+      .combine('stdDev', null, true)
+      .combine('variance', null, true), 
+  geometry: region, 
+  scale: 30,
+  bestEffort: true
+  });
+  print(histogram);
+  print(Chart.image.histogram(SimpleImageDiff.select('NBAI'), region, 30));
+}
+
+

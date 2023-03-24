@@ -1,0 +1,174 @@
+var Spectral = require("users/matifuentes2/crecimiento_urbano:modulos/Spectral")
+
+// Dynamic world built detection
+exports.dw = function(start_year, end_year, region)
+{
+  // Detect newly urbanized regions from the year 2021 to 2022.
+  var beforeYear = start_year;
+  var afterYear = end_year;
+  // Create start and end dates for the before and after periods.
+  var beforeStart = ee.Date.fromYMD(beforeYear, 1 , 1);
+  var beforeEnd = beforeStart.advance(1, 'year');
+  var afterStart = ee.Date.fromYMD(afterYear, 1 , 1);
+  var afterEnd = afterStart.advance(1, 'year');
+  // Filter the Dynamic World collection and select the 'built' band.
+  var dw = ee.ImageCollection('GOOGLE/DYNAMICWORLD/V1')
+  .filterBounds(region).select("label");
+  var beforeDw = dw.filterDate(beforeStart, beforeEnd).mode();
+  var afterDw = dw.filterDate(afterStart, afterEnd).mode();
+  //print(beforeDw)
+  // Create a mean composite indicating the average probability through the year.
+  var beforeUrban = beforeDw.eq(6);
+  var afterUrban = afterDw.eq(6);
+  return [beforeUrban, afterUrban]
+}
+
+//var MAX_CLOUD_PROBABILITY = 65;
+var MAX_CLOUD_PROBABILITY = 30;
+
+function maskClouds(img) {
+  var clouds = ee.Image(img.get('cloud_mask')).select('probability');
+  var isNotCloud = clouds.lt(MAX_CLOUD_PROBABILITY);
+  return img.updateMask(isNotCloud);
+}
+
+function maskEdges(s2_img) {
+  return s2_img.updateMask(
+      s2_img.select('B8A').mask().updateMask(s2_img.select('B9').mask()));
+}
+
+exports.clouds = function(start_year, end_year, region)
+{ 
+  // LEVEL 2A
+  var s2Sr = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED');
+  var s2Clouds = ee.ImageCollection('COPERNICUS/S2_CLOUD_PROBABILITY');  
+  var START_DATE = ee.Date(start_year +'-01-01');
+  var END_DATE = ee.Date(end_year +'-12-31');
+  
+  // Filter input collections by desired data range and region.
+  var criteria = ee.Filter.and(ee.Filter.bounds(region), ee.Filter.date(START_DATE, END_DATE));
+  s2Sr = s2Sr.filter(criteria).map(maskEdges);
+  s2Clouds = s2Clouds.filter(criteria);
+  // Join S2 SR with cloud probability dataset to add cloud mask.
+  var s2SrWithCloudMask = ee.Join.saveFirst('cloud_mask').apply({
+    primary: s2Sr,
+    secondary: s2Clouds,
+    condition:
+        ee.Filter.equals({leftField: 'system:index', rightField: 'system:index'})
+  });
+  
+  var s2CloudMasked = ee.ImageCollection(s2SrWithCloudMask).map(maskClouds);    
+  return s2CloudMasked; 
+}
+
+exports.clouds_l1c = function(start_year, end_year, region)
+{ 
+  var s2Sr = ee.ImageCollection('COPERNICUS/S2_HARMONIZED');
+  var s2Clouds = ee.ImageCollection('COPERNICUS/S2_CLOUD_PROBABILITY');  
+  var START_DATE = ee.Date(start_year +'-01-01');
+  var END_DATE = ee.Date(end_year +'-12-31');
+  
+  // Filter input collections by desired data range and region.
+  var criteria = ee.Filter.and(ee.Filter.bounds(region), ee.Filter.date(START_DATE, END_DATE));
+  s2Sr = s2Sr.filter(criteria).map(maskEdges);
+  s2Clouds = s2Clouds.filter(criteria);
+  // Join S2 SR with cloud probability dataset to add cloud mask.
+  var s2SrWithCloudMask = ee.Join.saveFirst('cloud_mask').apply({
+    primary: s2Sr,
+    secondary: s2Clouds,
+    condition:
+        ee.Filter.equals({leftField: 'system:index', rightField: 'system:index'})
+  });
+  
+  var s2CloudMasked = ee.ImageCollection(s2SrWithCloudMask).map(maskClouds);    
+  return s2CloudMasked; 
+}
+
+
+
+exports.yearly = function(img_collection, start_year, end_year){
+  
+  var stepList = ee.List.sequence(start_year, end_year);
+
+  var filterCollection = stepList.map(function(year){
+    var startDate = ee.Date.fromYMD(year,1,1);
+    var endDate = ee.Date.fromYMD(year,12,31);
+    var composite_i = img_collection
+                          .filterDate(startDate, endDate)
+                          .mean()
+                          .divide(10000)
+                          .set('system:time_start',startDate);
+    return composite_i;});
+    
+  var yearlyComposites = ee.ImageCollection(filterCollection);
+  yearlyComposites = yearlyComposites.map(function(image){return Spectral.addNBAI(image)});
+  return yearlyComposites;
+}
+
+exports.yearly_no_divide = function(img_collection, start_year, end_year){
+  
+  var stepList = ee.List.sequence(start_year, end_year);
+
+  var filterCollection = stepList.map(function(year){
+    var startDate = ee.Date.fromYMD(year,1,1);
+    var endDate = ee.Date.fromYMD(year,12,31);
+    var composite_i = img_collection
+                          .filterDate(startDate, endDate)
+                          .mean()
+                          .set('system:time_start',startDate);
+    return composite_i;});
+    
+  var yearlyComposites = ee.ImageCollection(filterCollection);
+  yearlyComposites = yearlyComposites.map(function(image){return Spectral.addNBAI(image)});
+  return yearlyComposites;
+}
+
+exports.monthly = function(img_collection, start_year, end_year){
+  var n_of_months = (end_year - start_year) * 12
+  var months = ee.List.sequence(0, n_of_months)
+  var filterCollection = months.map(function(n)
+  {
+    var startDate = ee.Date(start_year+'-01-01').advance(n, 'month')
+    var endDate = startDate.advance(1, 'month')
+    var composite_i = img_collection
+                          .filterDate(startDate, endDate)
+                          .mean()
+                          .divide(10000)
+                          .set('system:time_start',startDate);
+    return composite_i; 
+  })
+  var monthlyComposites = ee.ImageCollection(filterCollection);
+  monthlyComposites = monthlyComposites.map(function(image){return Spectral.addNBAI(image)});
+  return monthlyComposites;
+}
+
+exports.monthly_no_divide = function(img_collection, start_year, end_year){
+  var n_of_months = (end_year - start_year) * 12
+  var months = ee.List.sequence(0, n_of_months)
+  var filterCollection = months.map(function(n)
+  {
+    var startDate = ee.Date(start_year+'-01-01').advance(n, 'month')
+    var endDate = startDate.advance(1, 'month')
+    var composite_i = img_collection
+                          .filterDate(startDate, endDate)
+                          .mean()
+                          .set('system:time_start',startDate);
+    return composite_i; 
+  })
+  var monthlyComposites = ee.ImageCollection(filterCollection);
+  monthlyComposites = monthlyComposites.map(function(image){return Spectral.addNBAI(image)});
+  return monthlyComposites;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+  

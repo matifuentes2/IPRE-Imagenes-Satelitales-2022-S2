@@ -1,0 +1,50 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var stgocenter = 
+    /* color: #ff0000 */
+    /* shown: false */
+    ee.Geometry.Point([-70.65670970791878, -33.51063849579262]),
+    stgo = 
+    /* color: #009999 */
+    /* shown: false */
+    /* displayProperties: [
+      {
+        "type": "rectangle"
+      }
+    ] */
+    ee.Geometry.Polygon(
+        [[[-70.95318816691396, -33.247243108263575],
+          [-70.95318816691396, -33.67115303072693],
+          [-70.36129973917957, -33.67115303072693],
+          [-70.36129973917957, -33.247243108263575]]], null, false),
+    view_reference = 
+    /* color: #d63000 */
+    /* shown: false */
+    ee.Geometry.Point([-70.61894546315321, -33.51021696053359]),
+    built_area_2019_2021 = ee.FeatureCollection("projects/zinc-conduit-255721/assets/built_and_not_explained_2019_2021");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// Módulos
+var Filtering = require("users/matifuentes2/crecimiento_urbano:modulos/Filtering")
+var Spectral = require("users/matifuentes2/crecimiento_urbano:modulos/Spectral")
+var Viz = require("users/matifuentes2/crecimiento_urbano:modulos/Viz")
+
+var aoi = stgo
+var point = stgocenter
+var start_year = 2019
+var end_year = 2021
+Map.centerObject(view_reference, 15);
+
+
+// Dynamic world built detection
+var res = Filtering.dw(start_year, end_year, aoi)
+var beforeUrban = res[0];
+var afterUrban = res[1];
+
+// Clouds
+var s2CloudMasked = Filtering.clouds(start_year, end_year, stgo);
+var yearlyComposites = Filtering.yearly(s2CloudMasked, start_year, end_year);
+var SimpleImageDiff = Spectral.simple_img_diff(yearlyComposites, start_year, end_year,
+                                               beforeUrban, afterUrban, aoi)
+
+Viz.plot_rgb(yearlyComposites, start_year, end_year, beforeUrban, afterUrban, aoi)  
+
+var built_layer = Map.addLayer(built_area_2019_2021, {color: "red"}, "Construido no explicado")
